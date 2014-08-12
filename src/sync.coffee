@@ -10,6 +10,7 @@
 MongoCursor = require './cursor'
 Connection = require './lib/connection'
 DatabaseTools = require './database_tools'
+mongoConfigureModelType = null
 
 DESTROY_BATCH_LIMIT = 1000
 CAPABILITIES = {embed: true, json: true, unique: true, manual_ids: true, dynamic: true, self_reference: true}
@@ -156,6 +157,8 @@ module.exports = (type, sync_options={}) ->
     return if sync[method] then sync[method].apply(sync, Array::slice.call(arguments, 1)) else undefined
 
   Utils.configureModelType(type) # mixin extensions
+  mongoConfigureModelType or= require './extensions/model'
+  mongoConfigureModelType(type)
   return BackboneORM.model_cache.configureSync(type, sync_fn)
 
 module.exports.capabilities = (url) -> CAPABILITIES

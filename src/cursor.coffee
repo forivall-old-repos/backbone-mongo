@@ -32,16 +32,15 @@ module.exports = class MongoCursor extends sync.Cursor
   ##############################################
   # Execution of the Query
   ##############################################
-  queryToJSON: (callback) ->
-    return callback(null, if @hasCursorQuery('$one') then null else []) if @hasCursorQuery('$zero')
-    exists = @hasCursorQuery('$exists')
+  _queryToMongoCursor: (callback) ->
 
+    return callback(null, if @hasCursorQuery('$one') then null else []) if @hasCursorQuery('$zero')
     @buildFindQuery (err, find_query) =>
       return callback(err) if err
 
-      args = [_adaptIds(find_query, @backbone_adapter)]
-      args[0][@backbone_adapter.id_attribute] = {$in: _adaptIds(@_cursor.$ids, @backbone_adapter, true)} if @_cursor.$ids
-      args[0][key] = _adaptIds(@_cursor[key], @backbone_adapter) for key in ARRAY_QUERIES when @_cursor[key]
+      mongo_query = _adaptIds(find_query, @backbone_adapter)
+      mongo_query[@backbone_adapter.id_attribute] = {$in: _adaptIds(@_cursor.$ids, @backbone_adapter, true)} if @_cursor.$ids
+      mongo_query[key] = _adaptIds(@_cursor[key], @backbone_adapter) for key in ARRAY_QUERIES when @_cursor[key]
 
       # only select specific fields
       if @_cursor.$values
@@ -50,10 +49,11 @@ module.exports = class MongoCursor extends sync.Cursor
         $fields = if @_cursor.$white_list then _.intersection(@_cursor.$select, @_cursor.$white_list) else @_cursor.$select
       else if @_cursor.$white_list
         $fields = @_cursor.$white_list
+
+      return @_aggregateCursor(mongo_query, $fields, callback) if @_cursor.$unique
+
+      args = [mongo_query]
       args.push($fields) if $fields
-
-      return @aggregate(args[0], $fields, callback) if @_cursor.$unique
-
       # add callback and call
       args.push (err, cursor) =>
         return callback(err) if err
@@ -63,36 +63,44 @@ module.exports = class MongoCursor extends sync.Cursor
 
         cursor = cursor.skip(@_cursor.$offset) if @_cursor.$offset
 
-        if @_cursor.$one or exists
+        if @_cursor.$one or @hasCursorQuery('$exists')
           cursor = cursor.limit(1)
         else if @_cursor.$limit
           cursor = cursor.limit(@_cursor.$limit)
 
-        return cursor.count(callback) if @hasCursorQuery('$count') # only the count
-        return cursor.count((err, count) -> callback(err, !!count)) if exists # only if exists
-
-        cursor.toArray (err, docs) =>
-          return callback(err) if err
-          json = _.map(docs, (doc) => @backbone_adapter.nativeToAttributes(doc))
-
-          @fetchIncludes json, (err) =>
-            return callback(err) if err
-            if @hasCursorQuery('$page')
-              cursor.count (err, count) =>
-                return callback(err) if err
-                callback(null, {
-                  offset: @_cursor.$offset or 0
-                  total_rows: count
-                  rows: @selectResults(json)
-                })
-            else
-              callback(null, @selectResults(json))
+        callback(null, cursor)
 
       @connection.collection (err, collection) =>
         return callback(err) if err
         collection.find.apply(collection, args)
 
-  aggregate: (match, $fields, callback) =>
+  queryToJSON: (callback) ->
+    @_queryToMongoCursor (err, cursor) =>
+      return callback(err) if err
+
+      return @_aggregateMongoCursorToJSON(aggregate_cursor, callback) if (aggregate_cursor = cursor.aggregate_cursor)
+
+      return cursor.count(callback) if @hasCursorQuery('$count') # only the count
+      return cursor.count((err, count) -> callback(err, !!count)) if @hasCursorQuery('$exists') # only if exists
+
+      cursor.toArray (err, docs) =>
+        return callback(err) if err
+        json = _.map(docs, (doc) => @backbone_adapter.nativeToAttributes(doc))
+
+        @fetchIncludes json, (err) =>
+          return callback(err) if err
+          if @hasCursorQuery('$page')
+            cursor.count (err, count) =>
+              return callback(err) if err
+              callback(null, {
+                offset: @_cursor.$offset or 0
+                total_rows: count
+                rows: @selectResults(json)
+              })
+          else
+            callback(null, @selectResults(json))
+
+  _aggregateCursor: (match, $fields, callback) =>
     @connection.collection (err, collection) =>
       return callback(err) if err
       pipeline = []
@@ -125,14 +133,18 @@ module.exports = class MongoCursor extends sync.Cursor
       pipeline.push({$skip: @_cursor.$offset}) if @_cursor.$offset
 
       pipeline.push({$group: {_id: null, count: {$sum: 1}}}) if @_cursor.$count
+      cursor_options = {}
+      cursor_options.batchSize = fetch if (fetch = @_cursor.$each?.fetch)
+      callback(null, {aggregate_cursor: collection.aggregate(pipeline, {cursor: cursor_options})})
 
-      collection.aggregate pipeline, {}, (err, results) =>
-        return callback(err) if err
-        if @_cursor.$count
-          return callback(null, results[0].count)
-        # Clean up id mapping
-        for result in results
-          result.id = result.__id.toString()
-          delete result._id
-          delete result.__id
-        callback(null, @selectResults(results))
+  _aggregateMongoCursorToJSON: (aggregate_cursor, callback) ->
+    aggregate_cursor.get (err, results) =>
+      return callback(err) if err
+      if @_cursor.$count
+        return callback(null, results[0].count)
+      # Clean up id mapping
+      for result in results
+        result.id = result.__id.toString()
+        delete result._id
+        delete result.__id
+      callback(null, @selectResults(results))
