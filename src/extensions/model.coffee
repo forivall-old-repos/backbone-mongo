@@ -7,11 +7,8 @@
 ###
 
 modelEach = require './model_each'
-MongoSync = require '../sync'
 
 module.exports = (model_type) ->
-  return unless model_type::sync('sync') instanceof MongoSync
-
   model_type.each = (query, iterator, callback) ->
     [query, iterator, callback] = [{}, query, iterator] if arguments.length is 2
     modelEach(model_type, query, iterator, callback)

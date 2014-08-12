@@ -157,8 +157,10 @@ module.exports = (type, sync_options={}) ->
     return if sync[method] then sync[method].apply(sync, Array::slice.call(arguments, 1)) else undefined
 
   Utils.configureModelType(type) # mixin extensions
-  mongoConfigureModelType or= require './extensions/model'
-  mongoConfigureModelType(type)
-  return BackboneORM.model_cache.configureSync(type, sync_fn)
+  configured_sync = BackboneORM.model_cache.configureSync(type, sync_fn)
+  if configured_sync instanceof MongoSync
+    mongoConfigureModelType or= require './extensions/model'
+    mongoConfigureModelType(type)
+  return configured_sync
 
 module.exports.capabilities = (url) -> CAPABILITIES

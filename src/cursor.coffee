@@ -33,8 +33,6 @@ module.exports = class MongoCursor extends sync.Cursor
   # Execution of the Query
   ##############################################
   _queryToMongoCursor: (callback) ->
-
-    return callback(null, if @hasCursorQuery('$one') then null else []) if @hasCursorQuery('$zero')
     @buildFindQuery (err, find_query) =>
       return callback(err) if err
 
@@ -75,6 +73,7 @@ module.exports = class MongoCursor extends sync.Cursor
         collection.find.apply(collection, args)
 
   queryToJSON: (callback) ->
+    return callback(null, if @hasCursorQuery('$one') then null else []) if @hasCursorQuery('$zero')
     @_queryToMongoCursor (err, cursor) =>
       return callback(err) if err
 
