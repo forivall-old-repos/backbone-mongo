@@ -9,10 +9,12 @@
 {_} = require 'backbone-orm'
 Cursor = null
 
-module.exports = (model_type, query, iterator, callback) ->
+module.exports = (cursorFactory, query, iterator, callback) ->
+
   Cursor = require '../cursor' unless Cursor # module dependencies
 
   options = query.$each or {}
+
   # method = if options.json then 'toJSON' else 'toModels'
 
   processed_count = 0
@@ -22,7 +24,7 @@ module.exports = (model_type, query, iterator, callback) ->
   model_limit = parsed_query.cursor.$limit or Infinity
   # parsed_query.cursor.$limit = options.fetch if options.fetch
 
-  cursor = model_type.cursor(parsed_query)
+  cursor = cursorFactory(parsed_query)
   cursor._queryToMongoCursor (err, mongo_cursor) ->
     return callback(err) if err
     aggregate_cursor = mongo_cursor.aggregate_cursor
