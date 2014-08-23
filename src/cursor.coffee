@@ -52,7 +52,11 @@ module.exports = class MongoCursor extends sync.Cursor
         $fields = @_cursor.$white_list
       args.push($fields) if $fields
 
-      return @aggregate(args[0], $fields, callback) if @_cursor.$unique
+      if @_cursor.$unique
+        if @_cursor.$unique.length is 1 and _.isEqual($fields, @_cursor.$unique)
+          return @distinct(args[0], $fields[0], callback)
+        else
+          return @aggregate(args[0], $fields, callback)
 
       # add callback and call
       args.push (err, cursor) =>
@@ -91,6 +95,25 @@ module.exports = class MongoCursor extends sync.Cursor
       @connection.collection (err, collection) =>
         return callback(err) if err
         collection.find.apply(collection, args)
+
+  distinct: (match, field, callback) =>
+    @connection.collection (err, collection) =>
+      return callback(err) if err
+      collection.distinct field, match, (err, results) ->
+        return callback(err) if err
+        if @_cursor.$count
+          return callback(null, results.length)
+        if @_cursor.$values
+          if @_cursor.$one
+            return callback(null, results[0])
+          return callback(null, results)
+        mapped_results = []
+        for result in results
+          mapped_result = {}
+          mapeed_result[field] = result
+          mapped_results.push(mapped_result)
+        callback(null, @selectResults(mapped_results))
+      return
 
   aggregate: (match, $fields, callback) =>
     @connection.collection (err, collection) =>
